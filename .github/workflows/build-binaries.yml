@@ -29,19 +29,19 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean build.spec
 
-      - name: Package artifact
+      - name: Prepare artifact files
         shell: powershell
         run: |
+          Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path release -Force | Out-Null
           Copy-Item dist\* release\ -Recurse -Force
           Copy-Item README.md, LICENSE release\ -Force
-          Compress-Archive -Path release\* -DestinationPath KickDropsMiner-Windows-x64.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: KickDropsMiner-Windows-x64
-          path: KickDropsMiner-Windows-x64.zip
+          path: release/
 
   build-linux:
     name: Linux Portable Binary
@@ -71,15 +71,15 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean build.spec
 
-      - name: Package artifact
+      - name: Prepare artifact files
         run: |
+          rm -rf release
           mkdir -p release
           cp -r dist/* release/
           cp README.md LICENSE release/
-          tar -C release -czf KickDropsMiner-Linux-x64.tar.gz .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: KickDropsMiner-Linux-x64
-          path: KickDropsMiner-Linux-x64.tar.gz
+          path: release/
