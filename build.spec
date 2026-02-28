@@ -12,6 +12,7 @@ from PyInstaller.utils.hooks import (
 
 APP_NAME = "Kick Drops Miner"
 ICON_PATH = Path("icons/pickaxe.ico")
+ICON_PNG_PATH = Path("icons/pickaxe.png")
 APP_ENTRYPOINT = "app/main.py"
 APP_PATH = str(Path("app").resolve())
 
@@ -19,9 +20,15 @@ APP_PATH = str(Path("app").resolve())
 datas: list[tuple[str, str]] = []
 if ICON_PATH.exists():
     datas.append((str(ICON_PATH), "icons"))
+if ICON_PNG_PATH.exists():
+    datas.append((str(ICON_PNG_PATH), "icons"))
 
 # Collect dynamic/runtime imports used by Selenium stack and HTTP libs.
-hiddenimports: list[str] = ["PIL._tkinter_finder"]
+hiddenimports: list[str] = [
+    "PIL._tkinter_finder",
+    # Selenium imports `websocket` dynamically; include package root explicitly.
+    "websocket",
+]
 for pkg in (
     "selenium",
     "undetected_chromedriver",

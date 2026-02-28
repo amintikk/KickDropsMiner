@@ -11,6 +11,12 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 
+def _app_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
 def _init_ssl() -> None:
     try:
         import truststore  # type: ignore
@@ -23,7 +29,7 @@ def _init_ssl() -> None:
 
 
 def _init_logging() -> None:
-    base = Path(__file__).resolve().parent.parent
+    base = _app_base_dir()
     logs_dir = base / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_path = logs_dir / "app.log"

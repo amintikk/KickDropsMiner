@@ -202,6 +202,42 @@ def _fmt_exc(exc: Exception) -> str:
     return f"{exc.__class__.__name__}: unknown error"
 
 
+def _app_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+def _resource_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass)
+    return _app_base_dir()
+
+
+def _apply_window_icon(root: tk.Tk) -> None:
+    resource_dir = _resource_base_dir()
+    icon_ico = resource_dir / "icons" / "pickaxe.ico"
+    icon_png = resource_dir / "icons" / "pickaxe.png"
+
+    if sys.platform == "win32" and icon_ico.exists():
+        try:
+            root.iconbitmap(default=str(icon_ico))
+            return
+        except Exception:
+            pass
+
+    if icon_png.exists():
+        try:
+            image = tk.PhotoImage(file=str(icon_png))
+            root.iconphoto(True, image)
+            # Keep a strong reference; Tk drops images otherwise.
+            root._app_icon_ref = image  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+
 def normalize_kick_url(text: str) -> str:
     value = (text or "").strip()
     if not value:
@@ -2773,6 +2809,7 @@ def main() -> None:
             except Exception:
                 pass
     root = tk.Tk()
+    _apply_window_icon(root)
     try:
         style = ttk.Style(root)
         available = set(tkfont.families(root))
@@ -2793,7 +2830,7 @@ def main() -> None:
         style.configure("Treeview.Heading", font=heading_font)
     except Exception:
         pass
-    app = KickMinerApp(root, Path(__file__).resolve().parent.parent)
+    app = KickMinerApp(root, _app_base_dir())
     app.post_log("Aplicación iniciada")
     app.post_log("La app intentara restaurar la sesion guardada automaticamente al iniciar.")
     app.post_log("Si no hay sesion valida, pulsa 'Iniciar sesion' para autenticar de nuevo.")

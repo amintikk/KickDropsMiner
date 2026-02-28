@@ -155,6 +155,14 @@ class KickBrowserClient:
 
     @staticmethod
     def _import_websocket_client_module():
+        if getattr(sys, "frozen", False):
+            ws_module = importlib.import_module("websocket")
+            if not hasattr(ws_module, "create_connection"):
+                raise ImportError(
+                    f"Imported wrong websocket module: {getattr(ws_module, '__file__', '<unknown>')}"
+                )
+            return ws_module
+
         repo_dir_path = Path(__file__).resolve().parent
 
         def _norm_path(value: str) -> str:
@@ -357,27 +365,28 @@ if (originalQuery) {
         profile_name: str = "default",
     ):
         # Guard against local modules shadowing the third-party `websocket-client`
-        # dependency required by Selenium.
-        repo_dir_path = Path(__file__).resolve().parent
-
-        def _norm_path(value: str) -> str:
-            try:
-                return str(Path(value).resolve()).rstrip("\\/").casefold()
-            except Exception:
-                return str(value).rstrip("\\/").casefold()
-
-        repo_dir_norm = _norm_path(str(repo_dir_path))
+        # dependency required by Selenium (source run only).
         removed_entries: list[tuple[int, str]] = []
-        for idx in range(len(sys.path) - 1, -1, -1):
-            entry = sys.path[idx]
-            if entry in ("", ".") or _norm_path(entry) == repo_dir_norm:
-                removed_entries.append((idx, entry))
-                sys.path.pop(idx)
-        bad_websocket = sys.modules.get("websocket")
-        if bad_websocket is not None:
-            bad_file = str(getattr(bad_websocket, "__file__", "") or "")
-            if bad_file and _norm_path(str(Path(bad_file).resolve().parent)) == repo_dir_norm:
-                del sys.modules["websocket"]
+        if not getattr(sys, "frozen", False):
+            repo_dir_path = Path(__file__).resolve().parent
+
+            def _norm_path(value: str) -> str:
+                try:
+                    return str(Path(value).resolve()).rstrip("\\/").casefold()
+                except Exception:
+                    return str(value).rstrip("\\/").casefold()
+
+            repo_dir_norm = _norm_path(str(repo_dir_path))
+            for idx in range(len(sys.path) - 1, -1, -1):
+                entry = sys.path[idx]
+                if entry in ("", ".") or _norm_path(entry) == repo_dir_norm:
+                    removed_entries.append((idx, entry))
+                    sys.path.pop(idx)
+            bad_websocket = sys.modules.get("websocket")
+            if bad_websocket is not None:
+                bad_file = str(getattr(bad_websocket, "__file__", "") or "")
+                if bad_file and _norm_path(str(Path(bad_file).resolve().parent)) == repo_dir_norm:
+                    del sys.modules["websocket"]
         try:
             # Preload the correct third-party package while repo path is hidden.
             ws_client = importlib.import_module("websocket")
