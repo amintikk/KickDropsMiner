@@ -3,8 +3,13 @@ from __future__ import annotations
 import json
 import platform
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
+
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
 
 from kick_browser import KickBrowserClient, KickBrowserError
 
@@ -48,7 +53,7 @@ def check_browser(client: KickBrowserClient, mode: str) -> dict[str, Any]:
 
 
 def main() -> None:
-    base = Path(__file__).resolve().parent
+    base = Path(__file__).resolve().parent.parent
     client = KickBrowserClient(base)
     report: dict[str, Any] = {
         "python": run_cmd(["python", "--version"]),

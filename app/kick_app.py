@@ -37,6 +37,88 @@ from kick_models import (
 
 logger = logging.getLogger("KickDrops")
 
+ALL_GAMES_TOKEN = "__ALL_GAMES__"
+ALL_GAMES_LABEL = "Todos"
+AUTO_GAMES_CHANNEL_SOURCE = "source=auto-games-channel"
+
+UI_ES_TO_EN: dict[str, str] = {
+    "Sesion: no comprobada": "Session: not checked",
+    "Sesion": "Session",
+    "Sesion OK": "Session OK",
+    "Sesion cerrada": "Session closed",
+    "Sin sesion": "No session",
+    "Listo. Inicia sesion en Kick y refresca campañas.": "Ready. Log in to Kick and refresh campaigns.",
+    "Iniciar sesion": "Log in",
+    "Comprobar sesion": "Check session",
+    "Actualizar": "Refresh",
+    "Refresco de progreso: tiempo real (15s) | Player oculto y auto-claim: activos siempre": "Progress refresh: real-time (15s) | Hidden player and auto-claim: always on",
+    "Usuario activo:": "Active user:",
+    "Minado actual": "Current mining",
+    "Canal:": "Channel:",
+    "Campaña:": "Campaign:",
+    "Drop actual:": "Current drop:",
+    "Cambiar canal": "Switch channel",
+    "Tip: selecciona un canal en la tabla y pulsa 'Cambiar canal' para saltar al siguiente.": "Tip: select a channel in the table and press 'Switch channel' to jump to the next one.",
+    "Canal": "Channel",
+    "Espectadores": "Viewers",
+    "Campaña": "Campaign",
+    "Tiempo": "Time",
+    "Estado": "Status",
+    "Recompensas": "Rewards",
+    "Abrir canal": "Open channel",
+    "Eliminar": "Remove",
+    "Reiniciar tiempo": "Reset time",
+    "Subir": "Move up",
+    "Bajar": "Move down",
+    "Inventario": "Inventory",
+    "Campañas y drops visuales": "Visual campaigns and drops",
+    "Configuracion": "Settings",
+    "Seleccion de juegos para minado automatico": "Game selection for auto-mining",
+    "El minado automatico esta siempre activo. Marca juegos concretos o 'Todos'.": "Auto-mining is always active. Select specific games or 'All'.",
+    "Idioma:": "Language:",
+    "No hay campanas cargadas todavia. Pulsa 'Actualizar'.": "No campaigns loaded yet. Press 'Refresh'.",
+    "No hay campañas para mostrar.": "No campaigns to display.",
+    "No hay campañas de los juegos seleccionados.": "No campaigns for selected games.",
+    "No hay juegos seleccionados. Marca un juego o 'Todos' en Configuración.": "No games selected. Select a game or 'All' in Settings.",
+    "Sin drops en esta campana.": "No drops in this campaign.",
+    "Todos": "All",
+    "Todos los juegos": "All games",
+    "juegos seleccionados": "selected games",
+    "Objetivo": "Goal",
+    "Progreso campana": "Campaign progress",
+    "Finaliza": "Ends",
+    "Canales": "Channels",
+    "Reclamado": "Claimed",
+    "Pendiente": "Pending",
+    "disponible": "available",
+    "caducada": "expired",
+    "Campañas": "Campaigns",
+    "Progreso": "Progress",
+    "Cola vacía": "Empty queue",
+    "No hay canales disponibles.": "No channels available.",
+    "No hay canales disponibles para cambiar.": "No channels available to switch.",
+    "Este tab es solo visual.": "This tab is visual-only.",
+    "Sin minado activo": "No active mining",
+    "Sin datos de drop todavía": "No drop data yet",
+    "Cola iniciada": "Queue started",
+    "Cola detenida": "Queue stopped",
+    "Deteniendo cola...": "Stopping queue...",
+    "LIVE": "LIVE",
+    "FINISHED": "FINISHED",
+    "EXPIRED": "EXPIRED",
+    "RETRY": "RETRY",
+    "WRONG_CATEGORY": "WRONG_CATEGORY",
+    "CONNECTING": "CONNECTING",
+    "PENDING": "PENDING",
+    "STOPPED": "STOPPED",
+    "Ese canal ya está en la cola": "That channel is already in the queue",
+    "Ya existe": "Already exists",
+    "URL inválida": "Invalid URL",
+    "Error": "Error",
+    "Importar cookies": "Import cookies",
+}
+UI_EN_TO_ES: dict[str, str] = {v: k for k, v in UI_ES_TO_EN.items()}
+
 
 @dataclass(slots=True)
 class AppConfig:
@@ -53,6 +135,7 @@ class AppConfig:
     login_username: str = ""
     auto_game_mining: bool = False
     preferred_games: list[str] = field(default_factory=list)
+    language: str = "en"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -69,6 +152,7 @@ class AppConfig:
             "login_username": self.login_username,
             "auto_game_mining": self.auto_game_mining,
             "preferred_games": list(self.preferred_games),
+            "language": self.language,
         }
 
     @classmethod
@@ -100,6 +184,7 @@ class AppConfig:
                 for v in (data.get("preferred_games") or [])
                 if str(v).strip()
             ] if isinstance(data.get("preferred_games"), list) else [],
+            language=str(data.get("language") or "en").strip().lower() or "en",
         )
 
 
@@ -190,6 +275,7 @@ class QueueWorker(threading.Thread):
                 self.current_slug = ""
             result = self._process_item(item)
             if result == "retry":
+                self.app.post_retry_campaign_hint(item.campaign_id, item.campaign_name)
                 self.app.post_rotate_item(item.url)
             now = time.time()
             if now - last_save >= 3:
@@ -216,6 +302,10 @@ class QueueWorker(threading.Thread):
 
         while not self.stop_event.is_set():
             now = time.time()
+            if self.app._consume_force_channel_switch(url):
+                self.app.post_update_item(url, status="RETRY", notes="cambio manual de canal")
+                self.app.post_log(f"Cambio manual solicitado: {slug}")
+                return "retry"
             status_upper = str(item.status or "").upper()
             if item.done or status_upper in {"FINISHED", "EXPIRED"}:
                 if status_upper == "EXPIRED":
@@ -284,6 +374,7 @@ class KickMinerApp:
         self.worker: QueueWorker | None = None
 
         self.config = self._load_config()
+        self.config.language = "es" if str(self.config.language or "").strip().lower().startswith("es") else "en"
         # Force always-on operational behaviors.
         self.config.hide_player = True
         self.config.auto_claim = True
@@ -301,6 +392,12 @@ class KickMinerApp:
         self._initial_sync_done = False
         self._auto_login_running = False
         self._last_progress_refresh_ts = 0.0
+        self._last_campaigns_refresh_ts = 0.0
+        self._shutting_down = False
+        self._force_switch_urls: set[str] = set()
+        self._force_switch_lock = threading.Lock()
+        self._retry_campaign_hint_id: str | None = None
+        self._retry_campaign_hint_name: str | None = None
         self._login_driver = None
         self._inventory_driver = None
         self._reward_thumb_cache: dict[str, ImageTk.PhotoImage] = {}
@@ -314,7 +411,7 @@ class KickMinerApp:
         self._campaign_live_probe_token = 0
         self._campaign_channel_by_slug: dict[str, KickChannel] = {}
         self._channel_live_cache: dict[str, tuple[bool | None, int, float]] = {}
-        self._preferred_games_cached: list[str] = list(self.config.preferred_games)
+        self._preferred_games_cached: list[str] = self._normalize_preferred_games(self.config.preferred_games)
         self._inventory_refresh_pending = False
         self._settings_games_refresh_pending = False
         self._settings_game_vars: dict[str, tk.BooleanVar] = {}
@@ -356,8 +453,12 @@ class KickMinerApp:
         self.config.auto_refresh_seconds = 15
         self.config.login_username = ""
         self.config.auto_game_mining = True
+        if hasattr(self, "language_var"):
+            lang_raw = str(self.language_var.get() or "en").strip().lower()
+            self.config.language = "es" if lang_raw.startswith("es") else "en"
         if getattr(self, "_settings_game_vars", None):
             self._preferred_games_cached = self._get_selected_games_from_settings()
+        self._preferred_games_cached = self._normalize_preferred_games(self._preferred_games_cached)
         self.config.preferred_games = list(self._preferred_games_cached)
         with self.config_path.open("w", encoding="utf-8") as f:
             json.dump(self.config.to_dict(), f, ensure_ascii=False, indent=2)
@@ -371,17 +472,119 @@ class KickMinerApp:
                     img.putpixel((x, y), (45, 52, 58))
         return ImageTk.PhotoImage(img)
 
+    def _lang(self) -> str:
+        if hasattr(self, "language_var"):
+            raw = str(self.language_var.get() or "en").strip().lower()
+        else:
+            raw = str(self.config.language or "en").strip().lower()
+        return "es" if raw.startswith("es") else "en"
+
+    def _tr(self, text: str) -> str:
+        value = str(text or "")
+        if not value:
+            return value
+        if self._lang() == "en":
+            direct = UI_ES_TO_EN.get(value)
+            if direct is not None:
+                return direct
+            translated = value
+            for es, en in sorted(UI_ES_TO_EN.items(), key=lambda kv: len(kv[0]), reverse=True):
+                if es and es in translated:
+                    translated = translated.replace(es, en)
+            return translated
+        direct = UI_EN_TO_ES.get(value)
+        if direct is not None:
+            return direct
+        translated = value
+        for en, es in sorted(UI_EN_TO_ES.items(), key=lambda kv: len(kv[0]), reverse=True):
+            if en and en in translated:
+                translated = translated.replace(en, es)
+        return translated
+
+    def _tr_format(self, template: str, **kwargs) -> str:
+        return self._tr(template).format(**kwargs)
+
+    def _translate_widget_texts(self, widget) -> None:
+        try:
+            current = widget.cget("text")
+            if isinstance(current, str) and current.strip():
+                widget.configure(text=self._tr(current))
+        except Exception:
+            pass
+        for child in widget.winfo_children():
+            self._translate_widget_texts(child)
+
+    def _apply_language_to_ui(self) -> None:
+        self.root.title(self._tr("Kick Drops Miner"))
+        self._translate_widget_texts(self.root)
+        if hasattr(self, "notebook"):
+            for tab_id in self.notebook.tabs():
+                tab_text = self.notebook.tab(tab_id, "text")
+                if isinstance(tab_text, str) and tab_text:
+                    self.notebook.tab(tab_id, text=self._tr(tab_text))
+        if hasattr(self, "queue_tree"):
+            for col in self.queue_tree["columns"]:
+                heading_text = self.queue_tree.heading(col, "text")
+                if isinstance(heading_text, str) and heading_text:
+                    self.queue_tree.heading(col, text=self._tr(heading_text))
+        if hasattr(self, "queue_menu"):
+            for i in range(self.queue_menu.index("end") + 1):
+                try:
+                    label = self.queue_menu.entrycget(i, "label")
+                except Exception:
+                    continue
+                if isinstance(label, str) and label:
+                    self.queue_menu.entryconfigure(i, label=self._tr(label))
+        if hasattr(self, "settings_games_count_var"):
+            self._refresh_settings_count_label()
+        if hasattr(self, "status_var"):
+            self.status_var.set(self._tr(self.status_var.get()))
+        if hasattr(self, "session_status_var"):
+            self.session_status_var.set(self._tr(self.session_status_var.get()))
+
+    @staticmethod
+    def _language_code_to_label(code: str) -> str:
+        return "Español" if str(code or "").strip().lower().startswith("es") else "English"
+
+    @staticmethod
+    def _language_label_to_code(label: str) -> str:
+        return "es" if str(label or "").strip().lower().startswith("espa") else "en"
+
+    def _on_language_changed(self, _event=None) -> None:
+        selected_label = str(getattr(self, "language_combo_var", tk.StringVar(value="English")).get() or "English")
+        code = self._language_label_to_code(selected_label)
+        if self._lang() == code:
+            return
+        self.language_var.set(code)
+        self.save_config()
+        self._apply_language_to_ui()
+        self._refresh_queue_tree()
+        self._refresh_inventory_view()
+
     def _auto_refresh_tick(self) -> None:
         try:
             if self._session_state == "logged_in":
-                interval = 15
-                idle_ok = True  # we can refresh while running; requests are independent
-                if idle_ok and not self._refresh_progress_running:
-                    now = time.time()
-                    if (now - self._last_progress_refresh_ts) >= interval:
-                        self.refresh_progress(silent=True)
+                now = time.time()
+                progress_interval = 15
+                campaigns_interval = 120
+                if not self._refresh_progress_running and (now - self._last_progress_refresh_ts) >= progress_interval:
+                    self.refresh_progress(silent=True)
+                if not self._refresh_campaigns_running and (now - self._last_campaigns_refresh_ts) >= campaigns_interval:
+                    self.refresh_campaigns_and_progress(silent=True)
+                self._ensure_queue_worker_running()
         finally:
             self.root.after(1500, self._auto_refresh_tick)
+
+    def _ensure_queue_worker_running(self) -> None:
+        if self._shutting_down:
+            return
+        if self._session_state != "logged_in":
+            return
+        if self.worker is not None and self.worker.is_alive():
+            return
+        if not self.queue_items:
+            return
+        self.start_queue(silent=True)
 
     def _auto_restore_saved_session(self) -> None:
         if not self.browser.has_saved_cookies():
@@ -509,14 +712,31 @@ class KickMinerApp:
         if not self.campaigns:
             ttk.Label(
                 self.inventory_frame,
-                text="No hay campanas cargadas todavia. Pulsa 'Actualizar'.",
+                text=self._tr("No hay campanas cargadas todavia. Pulsa 'Actualizar'."),
             ).grid(row=0, column=0, sticky="ew", padx=12, pady=12)
             return
 
-        total_rewards = sum(len(campaign.rewards) for campaign in self.campaigns)
+        mine_all, selected_games = self._preferred_game_filter()
+        visible_campaigns = list(self.campaigns) if mine_all else [
+            campaign
+            for campaign in self.campaigns
+            if (campaign.game or "").strip().casefold() in selected_games
+        ]
+
+        if not visible_campaigns:
+            if mine_all:
+                msg = self._tr("No hay campañas para mostrar.")
+            elif selected_games:
+                msg = self._tr("No hay campañas de los juegos seleccionados.")
+            else:
+                msg = self._tr("No hay juegos seleccionados. Marca un juego o 'Todos' en Configuración.")
+            ttk.Label(self.inventory_frame, text=msg).grid(row=0, column=0, sticky="ew", padx=12, pady=12)
+            return
+
+        total_rewards = sum(len(campaign.rewards) for campaign in visible_campaigns)
         ttk.Label(
             self.inventory_frame,
-            text=f"{len(self.campaigns)} campanas | {total_rewards} drops",
+            text=f"{len(visible_campaigns)} {self._tr('Campañas').lower()} | {total_rewards} drops",
         ).grid(row=0, column=0, sticky="w", padx=8, pady=(2, 6))
 
         available_width = 1200
@@ -528,7 +748,7 @@ class KickMinerApp:
         reward_area_width = max(420, available_width - info_panel_width - 60)
         rewards_per_row = max(2, min(6, reward_area_width // 220))
 
-        for row_idx, campaign in enumerate(self.campaigns, start=1):
+        for row_idx, campaign in enumerate(visible_campaigns, start=1):
             is_expired = self._is_campaign_expired(campaign)
             frame_style = "InventoryNormal.TFrame"
             label_style = "InventoryNormal.TLabel"
@@ -573,11 +793,14 @@ class KickMinerApp:
             ttk.Label(info_panel, text=f"{campaign.game} | {campaign.name}", style=label_style).grid(row=0, column=1, sticky="w")
             ttk.Label(
                 info_panel,
-                text=f"{campaign_state}",
+                text=self._tr(f"{campaign_state}"),
                 style=label_style,
                 foreground=campaign_state_color,
             ).grid(row=1, column=1, sticky="w", pady=(2, 0))
-            status_text = f"Estado: {status} | Canales: {len(campaign.channels)} | Drops: {len(campaign.rewards)}"
+            status_text = (
+                f"{self._tr('Estado')}: {status} | "
+                f"{self._tr('Canales')}: {len(campaign.channels)} | Drops: {len(campaign.rewards)}"
+            )
             ttk.Label(
                 info_panel,
                 text=status_text,
@@ -585,14 +808,14 @@ class KickMinerApp:
             ).grid(row=2, column=1, sticky="w", pady=(2, 0))
             ttk.Label(
                 info_panel,
-                text=f"Finaliza: {campaign.ends_at or '-'}",
+                text=f"{self._tr('Finaliza')}: {campaign.ends_at or '-'}",
                 style=label_style,
             ).grid(row=3, column=1, sticky="w", pady=(2, 0))
             bar = ttk.Progressbar(info_panel, mode="determinate", maximum=100, value=campaign_percent)
             bar.grid(row=4, column=1, sticky="ew", pady=(6, 0))
             ttk.Label(
                 info_panel,
-                text=f"Progreso campana: {campaign_percent}% ({progress_text})",
+                text=f"{self._tr('Progreso campana')}: {campaign_percent}% ({progress_text})",
                 style=label_style,
             ).grid(
                 row=5, column=1, sticky="w", pady=(2, 0)
@@ -606,7 +829,7 @@ class KickMinerApp:
                 rewards_grid.columnconfigure(col, weight=1, uniform=f"reward-{row_idx}")
 
             if not campaign.rewards:
-                ttk.Label(rewards_grid, text="Sin drops en esta campana.", style=label_style).grid(
+                ttk.Label(rewards_grid, text=self._tr("Sin drops en esta campana."), style=label_style).grid(
                     row=0, column=0, sticky="w", padx=4, pady=4
                 )
                 continue
@@ -631,15 +854,16 @@ class KickMinerApp:
                 ttk.Label(reward_card, text=reward.name, wraplength=wraplength, justify=tk.LEFT, style=label_style).grid(
                     row=0, column=1, sticky="w"
                 )
-                goal_text = f"Objetivo: {int(reward.required_units or 0)} min"
+                goal_text = f"{self._tr('Objetivo')}: {int(reward.required_units or 0)} min"
                 ttk.Label(reward_card, text=goal_text, style=label_style).grid(row=1, column=1, sticky="w", pady=(2, 0))
                 reward_bar = ttk.Progressbar(reward_card, mode="determinate", maximum=100, value=reward_percent)
                 reward_bar.grid(row=2, column=1, sticky="ew", pady=(4, 0))
                 ttk.Label(
                     reward_card,
-                    text=f"{reward_percent}% | {'Reclamado' if reward.claimed else 'Pendiente'}",
+                    text=f"{reward_percent}% | {self._tr('Reclamado') if reward.claimed else self._tr('Pendiente')}",
                     style=label_style,
                 ).grid(row=3, column=1, sticky="w", pady=(4, 0))
+        self._apply_language_to_ui()
 
 
     def _get_reward_thumb(self, url: str | None) -> ImageTk.PhotoImage:
@@ -765,6 +989,7 @@ class KickMinerApp:
         self.show_browser_window_var = tk.BooleanVar(value=False)
         self.auto_refresh_progress_var = tk.BooleanVar(value=True)
         self.auto_refresh_seconds_var = tk.IntVar(value=15)
+        self.language_var = tk.StringVar(value=self.config.language)
         self.session_status_var = tk.StringVar(value="Sesion: no comprobada")
         self.login_username_var = tk.StringVar(value=self.config.login_username or "")
         self.auto_game_mining_var = tk.BooleanVar(value=True)
@@ -793,6 +1018,7 @@ class KickMinerApp:
         self._refresh_settings_games_list()
         self._refresh_inventory_view()
         self._refresh_general_mining_panel()
+        self._apply_language_to_ui()
 
     def _build_queue_tab(self) -> None:
         frame = ttk.Frame(self.notebook, padding=8)
@@ -846,20 +1072,18 @@ class KickMinerApp:
 
         controls = ttk.Frame(frame)
         controls.grid(row=2, column=0, sticky="ew", pady=(0, 8))
-        controls.columnconfigure(5, weight=1)
-        ttk.Button(controls, text="Añadir canal", command=self.add_queue_item_dialog).grid(row=0, column=0, padx=2)
-        ttk.Button(controls, text="Iniciar cola", command=self.start_queue).grid(row=0, column=1, padx=(12, 2))
-        ttk.Button(controls, text="Detener cola", command=self.stop_queue).grid(row=0, column=2, padx=2)
-        ttk.Button(controls, text="Limpiar terminados", command=self.clear_finished_queue_items).grid(row=0, column=3, padx=2)
+        controls.columnconfigure(2, weight=1)
+        ttk.Button(controls, text="Cambiar canal", command=self.change_channel_now).grid(row=0, column=0, padx=2)
         ttk.Label(
             controls,
-            text="Tip: clic derecho en la tabla para abrir canal, eliminar, mover y reiniciar tiempo.",
-        ).grid(row=1, column=0, columnspan=6, sticky="w", padx=2, pady=(6, 0))
+            text="Tip: selecciona un canal en la tabla y pulsa 'Cambiar canal' para saltar al siguiente.",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", padx=2, pady=(6, 0))
 
         columns = (
             "live",
             "channel",
             "campaign",
+            "viewers",
             "progress",
             "status",
             "rewards",
@@ -870,6 +1094,7 @@ class KickMinerApp:
             "live": "●",
             "channel": "Canal",
             "campaign": "Campaña",
+            "viewers": "Viewers",
             "progress": "Tiempo",
             "status": "Estado",
             "rewards": "Rewards",
@@ -877,10 +1102,11 @@ class KickMinerApp:
         widths = {
             "live": 42,
             "channel": 180,
-            "campaign": 260,
+            "campaign": 250,
+            "viewers": 90,
             "progress": 170,
-            "status": 220,
-            "rewards": 320,
+            "status": 210,
+            "rewards": 270,
         }
         for col in columns:
             self.queue_tree.heading(col, text=headings[col])
@@ -953,14 +1179,22 @@ class KickMinerApp:
         header = ttk.LabelFrame(frame, text="Seleccion de juegos para minado automatico")
         header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         header.columnconfigure(1, weight=1)
+        header.columnconfigure(3, weight=0)
         ttk.Label(
             header,
-            text="El minado automatico esta siempre activo. Marca los juegos que quieres minar.",
+            text="El minado automatico esta siempre activo. Marca juegos concretos o 'Todos'.",
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 2))
-        ttk.Label(
+        ttk.Label(header, text="Idioma:").grid(row=1, column=0, sticky="w", padx=8, pady=(0, 6))
+        self.language_combo_var = tk.StringVar(value=self._language_code_to_label(self.language_var.get()))
+        self.language_combo = ttk.Combobox(
             header,
-            text="Modo fijo: player oculto, auto-claim y refresco de progreso en tiempo real (15s).",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
+            textvariable=self.language_combo_var,
+            values=["English", "Español"],
+            state="readonly",
+            width=14,
+        )
+        self.language_combo.grid(row=1, column=1, sticky="w", padx=(0, 8), pady=(0, 6))
+        self.language_combo.bind("<<ComboboxSelected>>", self._on_language_changed)
 
         self.settings_games_count_var = tk.StringVar(value="0 juegos seleccionados")
         ttk.Label(header, textvariable=self.settings_games_count_var).grid(
@@ -997,6 +1231,7 @@ class KickMinerApp:
         setattr(self, attr_name, None)
 
     def _on_close(self) -> None:
+        self._shutting_down = True
         try:
             self.stop_queue()
         except Exception:
@@ -1022,6 +1257,23 @@ class KickMinerApp:
     def _dispatch(self, method: str, *args, **kwargs) -> None:
         self.ui_queue.put((method, args, kwargs))
 
+    def _request_force_channel_switch(self, url: str) -> None:
+        target = str(url or "").strip()
+        if not target:
+            return
+        with self._force_switch_lock:
+            self._force_switch_urls.add(target)
+
+    def _consume_force_channel_switch(self, url: str) -> bool:
+        target = str(url or "").strip()
+        if not target:
+            return False
+        with self._force_switch_lock:
+            if target in self._force_switch_urls:
+                self._force_switch_urls.remove(target)
+                return True
+        return False
+
     def post_log(self, text: str) -> None:
         self._dispatch("_ui_log", text)
 
@@ -1040,22 +1292,28 @@ class KickMinerApp:
     def post_rotate_item(self, url: str) -> None:
         self._dispatch("_ui_rotate_item", url)
 
+    def post_retry_campaign_hint(self, campaign_id: str | None, campaign_name: str | None) -> None:
+        self._dispatch("_ui_set_retry_campaign_hint", campaign_id, campaign_name)
+
     def post_session_status(self, info: dict[str, object]) -> None:
         self._dispatch("_ui_set_session_status", info)
 
     def _ui_log(self, text: str) -> None:
         stamp = time.strftime("%H:%M:%S")
-        logger.info(text)
+        localized = self._tr(text)
+        logger.info(localized)
         self.log_text.configure(state="normal")
-        self.log_text.insert(tk.END, f"[{stamp}] {text}\n")
+        self.log_text.insert(tk.END, f"[{stamp}] {localized}\n")
         self.log_text.see(tk.END)
         self.log_text.configure(state="disabled")
-        self.status_var.set(text.splitlines()[0][:180])
+        self.status_var.set(localized.splitlines()[0][:180])
 
     def _ui_worker_stopped(self) -> None:
         self.worker = None
-        self.status_var.set("Cola detenida")
+        self.status_var.set(self._tr("Cola detenida"))
         self._refresh_queue_tree()
+        if not self._shutting_down:
+            self.root.after(600, self._ensure_queue_worker_running)
 
     def _ui_save_config(self) -> None:
         try:
@@ -1071,6 +1329,14 @@ class KickMinerApp:
             setattr(item, k, v)
         if item.done and item.status != "FINISHED":
             item.status = "FINISHED"
+        if item.status in {"FINISHED", "EXPIRED"}:
+            hint_id = str(self._retry_campaign_hint_id or "")
+            hint_name = str(self._retry_campaign_hint_name or "")
+            item_id = str(item.campaign_id or "")
+            item_name = str(item.campaign_name or "").strip().lower()
+            if (hint_id and item_id == hint_id) or (hint_name and item_name == hint_name):
+                self._retry_campaign_hint_id = None
+                self._retry_campaign_hint_name = None
         self._refresh_queue_tree()
 
     def _ui_increment_elapsed(self, url: str, seconds: int) -> None:
@@ -1094,6 +1360,10 @@ class KickMinerApp:
             self.queue_items.append(self.queue_items.pop(idx))
             self._refresh_queue_tree()
 
+    def _ui_set_retry_campaign_hint(self, campaign_id: str | None, campaign_name: str | None) -> None:
+        self._retry_campaign_hint_id = str(campaign_id or "").strip() or None
+        self._retry_campaign_hint_name = str(campaign_name or "").strip().lower() or None
+
     def _ui_set_login_driver(self, driver) -> None:
         previous = getattr(self, "_login_driver", None)
         self._login_driver = driver
@@ -1113,7 +1383,7 @@ class KickMinerApp:
                 pass
 
     def _ui_messagebox_error(self, title: str, msg: str) -> None:
-        messagebox.showerror(title, msg, parent=self.root)
+        messagebox.showerror(self._tr(title), self._tr(msg), parent=self.root)
 
     def _ui_set_auto_login_state(self, running: bool) -> None:
         state = "disabled" if running else "normal"
@@ -1141,7 +1411,7 @@ class KickMinerApp:
             prefix = "Sin sesion"
         elif state == "checking":
             prefix = "Sesion"
-        self.session_status_var.set(f"{prefix}: {label}")
+        self.session_status_var.set(f"{self._tr(prefix)}: {self._tr(label)}")
         if username:
             self.session_user_var.set(username)
         elif user_id not in (None, ""):
@@ -1156,6 +1426,8 @@ class KickMinerApp:
             self._initial_sync_done = True
             self._ui_log("Sesion valida detectada. Cargando campanas y progreso...")
             self.refresh_campaigns_and_progress()
+        elif state == "logged_in":
+            self._ensure_queue_worker_running()
         self._refresh_general_mining_panel()
 
     def _find_item_by_url(self, url: str) -> QueueItem | None:
@@ -1248,12 +1520,22 @@ class KickMinerApp:
                 item.status = "FINISHED"
             status_upper = (item.status or "").upper()
             live_dot = "●"
+            live_state, viewers = self._get_channel_live_snapshot(
+                item.slug,
+                max_age_seconds=120.0,
+                use_network=False,
+            )
             if status_upper == "LIVE":
+                live_state = True
+            if live_state is True:
                 live_tag = "q_live_on"
-            elif status_upper in {"CONNECTING", "PENDING", "STOPPED", ""}:
-                live_tag = "q_live_unknown"
-            else:
+                viewers_text = str(max(0, int(viewers)))
+            elif live_state is False:
                 live_tag = "q_live_off"
+                viewers_text = "0"
+            else:
+                live_tag = "q_live_unknown"
+                viewers_text = "-"
 
             drop_status = "-"
             drop_units = "-"
@@ -1264,7 +1546,7 @@ class KickMinerApp:
                 if progress_campaign.rewards:
                     claimed_count = sum(1 for reward in progress_campaign.rewards if reward.claimed)
                     max_percent = max(int(reward.progress * 100) for reward in progress_campaign.rewards)
-                    rewards_summary = f"{claimed_count}/{len(progress_campaign.rewards)} claimed | max {max_percent}%"
+                    rewards_summary = f"{claimed_count}/{len(progress_campaign.rewards)} {self._tr('Reclamado').lower()} | max {max_percent}%"
             if drop_units != "-" and drop_units:
                 if rewards_summary == "-":
                     rewards_summary = f"{drop_units}u"
@@ -1272,9 +1554,9 @@ class KickMinerApp:
                     rewards_summary = f"{rewards_summary} | {drop_units}u"
 
             if drop_status != "-" and drop_status:
-                status_text = f"{item.status} | {drop_status}"
+                status_text = f"{self._tr(item.status)} | {self._tr(drop_status)}"
             else:
-                status_text = item.status
+                status_text = self._tr(item.status)
 
             status_tag = item.status if item.status in {
                 "LIVE", "FINISHED", "EXPIRED", "RETRY", "WRONG_CATEGORY", "CONNECTING"
@@ -1290,6 +1572,7 @@ class KickMinerApp:
                     live_dot,
                     item.slug,
                     item.campaign_name or "",
+                    viewers_text,
                     progress_text,
                     status_text,
                     rewards_summary,
@@ -1317,7 +1600,7 @@ class KickMinerApp:
             self.general_current_channel_var.set("-")
             self.general_current_campaign_var.set("-")
             self.general_current_drop_var.set("-")
-            self.general_current_progress_var.set("Sin minado activo")
+            self.general_current_progress_var.set(self._tr("Sin minado activo"))
             if hasattr(self, "general_campaign_progress"):
                 self.general_campaign_progress["value"] = 0
             return
@@ -1341,7 +1624,7 @@ class KickMinerApp:
 
         active_drop_name = "-"
         active_drop_pct = 0
-        detail = "Sin datos de drop todavía"
+        detail = self._tr("Sin datos de drop todavía")
         if campaign_progress is not None and campaign_progress.rewards:
             reward = next((r for r in campaign_progress.rewards if not r.claimed), campaign_progress.rewards[-1])
             active_drop_name = reward.name or reward.id
@@ -1357,6 +1640,66 @@ class KickMinerApp:
         self.general_current_progress_var.set(detail)
         self.general_campaign_progress["value"] = active_drop_pct
 
+    @staticmethod
+    def _normalize_preferred_games(values: list[str] | None) -> list[str]:
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for raw in values or []:
+            game = str(raw or "").strip()
+            if not game:
+                continue
+            key = game.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(game)
+        if any(game == ALL_GAMES_TOKEN for game in cleaned):
+            return [ALL_GAMES_TOKEN]
+        if cleaned:
+            return sorted(cleaned, key=lambda s: s.casefold())
+        return [ALL_GAMES_TOKEN]
+
+    def _preferred_game_filter(self) -> tuple[bool, set[str]]:
+        normalized = self._normalize_preferred_games(self._preferred_games_cached)
+        self._preferred_games_cached = normalized
+        mine_all = ALL_GAMES_TOKEN in normalized
+        selected = {
+            game.strip().casefold()
+            for game in normalized
+            if game != ALL_GAMES_TOKEN and game.strip()
+        }
+        return (mine_all, selected)
+
+    def _refresh_settings_count_label(self) -> None:
+        if not hasattr(self, "settings_games_count_var"):
+            return
+        mine_all, selected_games = self._preferred_game_filter()
+        if mine_all:
+            self.settings_games_count_var.set(self._tr("Todos los juegos"))
+            return
+        self.settings_games_count_var.set(f"{len(selected_games)} {self._tr('juegos seleccionados')}")
+
+    @staticmethod
+    def _is_auto_games_channel_item(item: QueueItem) -> bool:
+        return AUTO_GAMES_CHANNEL_SOURCE in str(item.notes or "")
+
+    @staticmethod
+    def _build_auto_games_item_notes(campaign: KickCampaign, channel: KickChannel, viewers: int) -> str:
+        return (
+            f"{AUTO_GAMES_CHANNEL_SOURCE} | "
+            f"game={campaign.game} | auto={channel.slug} ({max(0, int(viewers))} viewers)"
+        )
+
+    @staticmethod
+    def _channel_live_sort_key(live: bool | None, viewers: int, slug: str) -> tuple[int, int, str]:
+        if live is True:
+            rank = 0
+        elif live is False:
+            rank = 1
+        else:
+            rank = 2
+        return (rank, -max(0, int(viewers)), str(slug or "").casefold())
+
     def _get_selected_games_from_settings(self) -> list[str]:
         if not hasattr(self, "_settings_game_vars"):
             return list(self._preferred_games_cached)
@@ -1365,7 +1708,7 @@ class KickMinerApp:
             for game, var in self._settings_game_vars.items()
             if bool(var.get())
         ]
-        return sorted(selected, key=lambda s: s.casefold())
+        return self._normalize_preferred_games(selected)
 
     def _apply_settings_game_card_style(self, game: str) -> None:
         card = self._settings_game_cards.get(game)
@@ -1385,16 +1728,38 @@ class KickMinerApp:
         check.configure(bg=bg, activebackground=bg, fg=fg, activeforeground=fg, selectcolor=bg)
 
     def _on_settings_game_toggle(self, game: str) -> None:
+        current_var = self._settings_game_vars.get(game)
+        if current_var is None:
+            return
+
+        if game == ALL_GAMES_TOKEN and bool(current_var.get()):
+            for other_game, other_var in self._settings_game_vars.items():
+                if other_game == ALL_GAMES_TOKEN:
+                    continue
+                if bool(other_var.get()):
+                    other_var.set(False)
+                    self._apply_settings_game_card_style(other_game)
+        elif game != ALL_GAMES_TOKEN and bool(current_var.get()):
+            all_var = self._settings_game_vars.get(ALL_GAMES_TOKEN)
+            if all_var is not None and bool(all_var.get()):
+                all_var.set(False)
+                self._apply_settings_game_card_style(ALL_GAMES_TOKEN)
+
         self._preferred_games_cached = self._get_selected_games_from_settings()
-        if hasattr(self, "settings_games_count_var"):
-            self.settings_games_count_var.set(f"{len(self._preferred_games_cached)} juegos seleccionados")
         self._apply_settings_game_card_style(game)
+        self._refresh_settings_count_label()
+        self._apply_language_to_ui()
+        self._refresh_inventory_view()
+        self._auto_queue_selected_games()
+        self._refresh_queue_tree()
+        self._ensure_queue_worker_running()
         self.save_config()
 
     def _refresh_settings_games_list(self) -> None:
         if not hasattr(self, "settings_games_frame"):
             return
 
+        self._preferred_games_cached = self._normalize_preferred_games(self._preferred_games_cached)
         selected = set(self._preferred_games_cached)
         discovered: dict[str, str] = {}
         for campaign in self.campaigns:
@@ -1406,7 +1771,10 @@ class KickMinerApp:
         for game_name in selected:
             discovered.setdefault(game_name, "")
 
-        all_games = sorted(discovered.keys(), key=lambda s: s.casefold())
+        all_games = [ALL_GAMES_TOKEN] + sorted(
+            [name for name in discovered.keys() if name != ALL_GAMES_TOKEN],
+            key=lambda s: s.casefold(),
+        )
         self._settings_game_images = dict(discovered)
 
         for child in self.settings_games_frame.winfo_children():
@@ -1414,15 +1782,6 @@ class KickMinerApp:
         self._settings_game_vars = {}
         self._settings_game_cards = {}
         self._settings_game_checks = {}
-
-        if not all_games:
-            ttk.Label(
-                self.settings_games_frame,
-                text="No hay juegos cargados aun. Pulsa 'Actualizar' en Inventario.",
-            ).grid(row=0, column=0, sticky="w", padx=8, pady=8)
-            if hasattr(self, "settings_games_count_var"):
-                self.settings_games_count_var.set("0 juegos seleccionados")
-            return
 
         canvas_width = 980
         try:
@@ -1439,6 +1798,7 @@ class KickMinerApp:
             selected_now = game in selected
             bg = "#d9f7df" if selected_now else "#f0f0f0"
             fg = "#1f8f4a" if selected_now else "#1f1f1f"
+            display_name = self._tr(ALL_GAMES_LABEL) if game == ALL_GAMES_TOKEN else game
 
             card = tk.Frame(
                 self.settings_games_frame,
@@ -1463,7 +1823,7 @@ class KickMinerApp:
             self._settings_game_vars[game] = var
             check = tk.Checkbutton(
                 card,
-                text=game,
+                text=display_name,
                 variable=var,
                 bg=bg,
                 activebackground=bg,
@@ -1479,44 +1839,119 @@ class KickMinerApp:
             self._settings_game_checks[game] = check
             self._apply_settings_game_card_style(game)
 
-        if hasattr(self, "settings_games_count_var"):
-            self.settings_games_count_var.set(f"{len(self._preferred_games_cached)} juegos seleccionados")
+        self._refresh_settings_count_label()
 
     def _auto_queue_selected_games(self) -> int:
-        selected_games = set(self._preferred_games_cached)
-        if not selected_games or not self.campaigns:
+        mine_all, selected_games = self._preferred_game_filter()
+        if not self.campaigns:
             return 0
-        added = 0
-        updated = 0
+        if not mine_all and not selected_games:
+            return 0
+        desired_by_url: dict[str, dict[str, object]] = {}
         for campaign in self.campaigns:
-            if (campaign.game or "").strip() not in selected_games:
+            game_key = (campaign.game or "").strip().casefold()
+            if not mine_all and game_key not in selected_games:
                 continue
             if self._is_campaign_expired(campaign):
-                existing = self._find_queue_item_for_campaign(campaign.id, campaign.name)
-                if existing is not None and existing.status != "EXPIRED":
-                    existing.status = "EXPIRED"
-                    existing.notes = f"game={campaign.game} | campaign expired"
-                    updated += 1
                 continue
-            existing = self._find_queue_item_for_campaign(campaign.id, campaign.name)
-            preferred, _is_live, viewers = self._pick_preferred_channel_for_campaign(campaign, use_network=False)
-            if preferred is None and campaign.channels:
-                preferred = campaign.channels[0]
-            if existing is not None:
-                if preferred is not None and existing.url != preferred.url:
-                    existing.url = preferred.url
-                    existing.notes = f"game={campaign.game} | auto={preferred.slug} ({viewers} viewers)"
-                    updated += 1
+            for channel in campaign.channels:
+                slug = (channel.slug or "").strip()
+                if not slug:
+                    continue
+                url = (channel.url or f"https://kick.com/{slug}").strip()
+                if not url:
+                    continue
+                live, viewers = self._get_channel_live_snapshot(
+                    slug,
+                    max_age_seconds=45.0,
+                    use_network=True,
+                )
+                sort_key = self._channel_live_sort_key(live, viewers, slug)
+                previous = desired_by_url.get(url)
+                if previous is None or sort_key < previous["sort_key"]:
+                    desired_by_url[url] = {
+                        "campaign": campaign,
+                        "channel": channel,
+                        "live": live,
+                        "viewers": int(viewers),
+                        "sort_key": sort_key,
+                    }
+
+        ordered = sorted(desired_by_url.values(), key=lambda d: d["sort_key"])
+        existing_by_url: dict[str, QueueItem] = {}
+        for item in self.queue_items:
+            if item.url and item.url not in existing_by_url:
+                existing_by_url[item.url] = item
+
+        added = 0
+        updated = 0
+        removed = 0
+        ordered_urls: set[str] = set()
+        final_queue: list[QueueItem] = []
+
+        for row in ordered:
+            campaign = row["campaign"]
+            channel = row["channel"]
+            viewers = int(row["viewers"])
+            if not isinstance(campaign, KickCampaign) or not isinstance(channel, KickChannel):
                 continue
-            if preferred is not None and self._find_item_by_url(preferred.url) is None:
-                if self._add_campaign_channel_to_queue(preferred.url, campaign, silent=True):
-                    added += 1
-        if added or updated:
-            self._refresh_queue_tree()
-            msg = f"Auto-minado por juegos: añadidos {added} canales a la cola."
-            if updated:
-                msg += f" Actualizados {updated} canales preferidos."
-            self.post_log(msg)
+            url = str(channel.url or f"https://kick.com/{channel.slug}")
+            existing = existing_by_url.get(url)
+            if existing is None:
+                existing = QueueItem(
+                    url=url,
+                    minutes_target=0,
+                    status="PENDING",
+                    campaign_id=campaign.id,
+                    campaign_name=campaign.name,
+                    category_id=campaign.category_id,
+                    notes=self._build_auto_games_item_notes(campaign, channel, viewers),
+                )
+                added += 1
+            else:
+                before = (
+                    existing.campaign_id,
+                    existing.campaign_name,
+                    existing.category_id,
+                    existing.notes,
+                    existing.status,
+                )
+                existing.campaign_id = campaign.id
+                existing.campaign_name = campaign.name
+                existing.category_id = campaign.category_id
+                existing.notes = self._build_auto_games_item_notes(campaign, channel, viewers)
+                if existing.status == "EXPIRED":
+                    existing.status = "PENDING"
+                after = (
+                    existing.campaign_id,
+                    existing.campaign_name,
+                    existing.category_id,
+                    existing.notes,
+                    existing.status,
+                )
+                if after != before:
+                    updated += 1
+            ordered_urls.add(url)
+            final_queue.append(existing)
+
+        for item in self.queue_items:
+            if item.url in ordered_urls:
+                continue
+            if self._is_auto_games_channel_item(item):
+                removed += 1
+                continue
+            final_queue.append(item)
+
+        order_or_size_changed = len(final_queue) != len(self.queue_items) or any(
+            a is not b for a, b in zip(final_queue, self.queue_items)
+        )
+        if order_or_size_changed:
+            self.queue_items = final_queue
+
+        if added or updated or removed:
+            self.post_log(
+                f"Canales auto por juegos: {len(ordered)} visibles | +{added} nuevos | ~{updated} actualizados | -{removed} retirados"
+            )
         return added
 
     def _find_queue_item_for_campaign(self, campaign_id: str | None, campaign_name: str | None) -> QueueItem | None:
@@ -1622,8 +2057,8 @@ class KickMinerApp:
         return (is_live, viewers)
 
     def get_next_queue_item(self) -> QueueItem | None:
-        selected_games = set(self._preferred_games_cached)
-        auto_filter = bool(selected_games)
+        mine_all, selected_games = self._preferred_game_filter()
+        auto_filter = (not mine_all) and bool(selected_games)
         campaign_by_id = {campaign.id: campaign for campaign in self.campaigns if campaign.id}
         campaign_by_name = {
             (campaign.name or "").strip().lower(): campaign
@@ -1636,9 +2071,30 @@ class KickMinerApp:
             for campaign in self.progress
             if (campaign.name or "").strip()
         }
+        hint_id = str(self._retry_campaign_hint_id or "").strip()
+        hint_name = str(self._retry_campaign_hint_name or "").strip().lower()
+        ordered_items: list[QueueItem]
+        if hint_id or hint_name:
+            preferred_items: list[QueueItem] = []
+            other_items: list[QueueItem] = []
+            for item in self.queue_items:
+                item_id = str(item.campaign_id or "").strip()
+                item_name = str(item.campaign_name or "").strip().lower()
+                if (hint_id and item_id == hint_id) or (hint_name and item_name == hint_name):
+                    preferred_items.append(item)
+                else:
+                    other_items.append(item)
+            if preferred_items:
+                ordered_items = preferred_items + other_items
+            else:
+                self._retry_campaign_hint_id = None
+                self._retry_campaign_hint_name = None
+                ordered_items = list(self.queue_items)
+        else:
+            ordered_items = list(self.queue_items)
         fallback_item: QueueItem | None = None
         fallback_live_viewers = -1
-        for item in self.queue_items:
+        for item in ordered_items:
             if item.minutes_target > 0 and item.done:
                 item.status = "FINISHED"
                 continue
@@ -1656,10 +2112,18 @@ class KickMinerApp:
                 continue
             if auto_filter and (item.campaign_id or item.campaign_name):
                 if campaign is not None:
-                    game_name = (campaign.game or "").strip()
+                    game_name = (campaign.game or "").strip().casefold()
                     if game_name and game_name not in selected_games:
                         continue
-            is_live, viewers = self._set_item_channel_for_campaign(item, campaign, use_network=True)
+            if self._is_auto_games_channel_item(item):
+                live_snapshot, viewers = self._get_channel_live_snapshot(
+                    item.slug,
+                    max_age_seconds=30.0,
+                    use_network=True,
+                )
+                is_live = live_snapshot is True
+            else:
+                is_live, viewers = self._set_item_channel_for_campaign(item, campaign, use_network=True)
             if is_live:
                 return item
             if fallback_item is None or viewers > fallback_live_viewers:
@@ -1674,10 +2138,10 @@ class KickMinerApp:
         try:
             url = normalize_kick_url(raw)
         except Exception as exc:
-            messagebox.showerror("URL inválida", str(exc), parent=self.root)
+            messagebox.showerror(self._tr("URL inválida"), self._tr(str(exc)), parent=self.root)
             return
         if self._find_item_by_url(url) is not None:
-            messagebox.showinfo("Ya existe", "Ese canal ya está en la cola", parent=self.root)
+            messagebox.showinfo(self._tr("Ya existe"), self._tr("Ese canal ya está en la cola"), parent=self.root)
             return
         slug = url.rstrip("/").split("/")[-1].strip().lower()
         linked_campaign = self._find_best_campaign_for_channel_slug(slug)
@@ -1801,22 +2265,53 @@ class KickMinerApp:
                 item.notes = ""
         self._refresh_queue_tree()
 
-    def start_queue(self) -> None:
+    def change_channel_now(self) -> None:
+        target_item: QueueItem | None = None
+        selected = list(self.queue_tree.selection())
+        if selected:
+            try:
+                idx = int(selected[0])
+                if 0 <= idx < len(self.queue_items):
+                    target_item = self.queue_items[idx]
+            except Exception:
+                target_item = None
+        if target_item is None and self.worker is not None and self.worker.current_url:
+            target_item = self._find_item_by_url(self.worker.current_url)
+        if target_item is None:
+            for item in self.queue_items:
+                if item.status not in {"FINISHED", "EXPIRED"}:
+                    target_item = item
+                    break
+        if target_item is None:
+            self.post_log("No hay canales disponibles para cambiar.")
+            return
+        self._request_force_channel_switch(target_item.url)
+        target_item.status = "RETRY"
+        target_item.notes = "cambio manual solicitado"
+        self._ui_rotate_item(target_item.url)
+        self._refresh_queue_tree()
+        self._ensure_queue_worker_running()
+        self.post_log(f"Cambio manual: {target_item.slug} -> siguiente canal disponible")
+
+    def start_queue(self, *, silent: bool = False) -> bool:
         if self.worker is not None and self.worker.is_alive():
-            return
+            return True
         if not self.queue_items:
-            messagebox.showinfo("Cola vacía", "Añade al menos un canal", parent=self.root)
-            return
+            if not silent:
+                messagebox.showinfo(self._tr("Cola vacía"), self._tr("No hay canales disponibles."), parent=self.root)
+            return False
         self.save_config()
         self.worker = QueueWorker(self)
         self.worker.start()
-        self.status_var.set("Cola iniciada")
+        if not silent:
+            self.status_var.set(self._tr("Cola iniciada"))
+        return True
 
     def stop_queue(self) -> None:
         if self.worker is None:
             return
         self.worker.stop()
-        self.status_var.set("Deteniendo cola...")
+        self.status_var.set(self._tr("Deteniendo cola..."))
 
     def _candidate_cookie_sources(self) -> list[str]:
         selected = (self.cookie_source_var.get().strip() or "chrome").lower()
@@ -1948,7 +2443,7 @@ class KickMinerApp:
             self.post_log(f"Cookies guardadas/importadas ({count}) desde {source}")
             self.refresh_session_status()
         except Exception as exc:
-            messagebox.showerror("Error", str(exc), parent=self.root)
+            messagebox.showerror(self._tr("Error"), self._tr(str(exc)), parent=self.root)
 
     def import_cookies_from_browser(self) -> None:
         source = self.cookie_source_var.get().strip() or "chrome"
@@ -2016,22 +2511,25 @@ class KickMinerApp:
             self.post_log("No se pueden cargar campanas sin sesion activa. Pulsa 'Iniciar sesion'.")
             self.refresh_session_status()
             return
-        self._refresh_campaigns_worker(include_progress=False)
+        self._refresh_campaigns_worker(include_progress=False, silent=False)
 
-    def refresh_campaigns_and_progress(self) -> None:
+    def refresh_campaigns_and_progress(self, *, silent: bool = False) -> None:
         if self._session_state != "logged_in":
-            self.post_log("No se pueden cargar campanas/progreso sin sesion activa. Pulsa 'Iniciar sesion'.")
+            if not silent:
+                self.post_log("No se pueden cargar campanas/progreso sin sesion activa. Pulsa 'Iniciar sesion'.")
             self.refresh_session_status()
             return
-        self._refresh_campaigns_worker(include_progress=True)
+        self._refresh_campaigns_worker(include_progress=True, silent=silent)
 
-    def _refresh_campaigns_worker(self, *, include_progress: bool) -> None:
+    def _refresh_campaigns_worker(self, *, include_progress: bool, silent: bool) -> None:
         if self._refresh_campaigns_running:
-            self.post_log("Ya hay una actualización de campañas en curso")
+            if not silent:
+                self.post_log("Ya hay una actualización de campañas en curso")
             return
         def task():
             self._refresh_campaigns_running = True
-            self.post_log("Consultando campañas de Kick...")
+            if not silent:
+                self.post_log("Consultando campañas de Kick...")
             try:
                 if include_progress:
                     campaigns_raw, progress_raw = self.browser.fetch_campaigns_and_progress()
@@ -2039,15 +2537,18 @@ class KickMinerApp:
                     progress = parse_progress_response(progress_raw)
                     merge_campaigns_with_progress(campaigns, progress)
                     self._dispatch("_ui_set_campaigns_and_progress", campaigns, progress)
-                    self.post_log(f"Campañas: {len(campaigns)} | Progreso: {len(progress)}")
+                    if not silent:
+                        self.post_log(f"Campañas: {len(campaigns)} | Progreso: {len(progress)}")
                 else:
                     campaigns_raw = self.browser.fetch_campaigns()
                     campaigns = parse_campaigns_response(campaigns_raw)
                     self._dispatch("_ui_set_campaigns", campaigns)
-                    self.post_log(f"Campañas cargadas: {len(campaigns)}")
+                    if not silent:
+                        self.post_log(f"Campañas cargadas: {len(campaigns)}")
             except Exception as exc:
                 self.post_log(f"Error cargando campañas: {exc}")
-                self._dispatch("_ui_messagebox_error", "Campañas", str(exc))
+                if not silent:
+                    self._dispatch("_ui_messagebox_error", "Campañas", str(exc))
             finally:
                 self._refresh_campaigns_running = False
 
@@ -2081,6 +2582,7 @@ class KickMinerApp:
 
     def _ui_set_campaigns(self, campaigns: list[KickCampaign]) -> None:
         self.campaigns = campaigns
+        self._last_campaigns_refresh_ts = time.time()
         self.campaign_map = {c.id: c for c in campaigns}
         self._refresh_campaign_tree()
         self._refresh_campaign_detail(None)
@@ -2088,6 +2590,7 @@ class KickMinerApp:
         self._refresh_inventory_view()
         self._auto_queue_selected_games()
         self._refresh_queue_tree()
+        self._ensure_queue_worker_running()
 
     def _ui_set_progress(self, progress: list[KickProgressCampaign]) -> None:
         self.progress = progress
@@ -2098,6 +2601,7 @@ class KickMinerApp:
             self._refresh_campaign_detail(self._selected_campaign())
         self._refresh_inventory_view()
         self._refresh_queue_tree()
+        self._ensure_queue_worker_running()
 
     def _ui_set_campaigns_and_progress(
         self,
@@ -2107,6 +2611,7 @@ class KickMinerApp:
         self.campaigns = campaigns
         self.progress = progress
         self._last_progress_refresh_ts = time.time()
+        self._last_campaigns_refresh_ts = time.time()
         self.campaign_map = {c.id: c for c in campaigns}
         self._refresh_campaign_tree()
         self._refresh_campaign_detail(None)
@@ -2114,6 +2619,7 @@ class KickMinerApp:
         self._refresh_inventory_view()
         self._auto_queue_selected_games()
         self._refresh_queue_tree()
+        self._ensure_queue_worker_running()
 
     def _refresh_campaign_tree(self) -> None:
         # Tab Inventario en modo visual-only: no hay tabla interactiva de campañas.
@@ -2221,13 +2727,13 @@ class KickMinerApp:
         return
 
     def open_selected_campaign_channel(self) -> None:
-        messagebox.showinfo("Inventario", "Este tab es solo visual.", parent=self.root)
+        messagebox.showinfo(self._tr("Inventario"), self._tr("Este tab es solo visual."), parent=self.root)
 
     def add_selected_campaign_channel_to_queue(self) -> None:
-        messagebox.showinfo("Inventario", "Este tab es solo visual.", parent=self.root)
+        messagebox.showinfo(self._tr("Inventario"), self._tr("Este tab es solo visual."), parent=self.root)
 
     def add_all_channels_from_selected_campaign(self) -> None:
-        messagebox.showinfo("Inventario", "Este tab es solo visual.", parent=self.root)
+        messagebox.showinfo(self._tr("Inventario"), self._tr("Este tab es solo visual."), parent=self.root)
 
     def _add_campaign_channel_to_queue(
         self,
@@ -2238,7 +2744,7 @@ class KickMinerApp:
     ) -> bool:
         if self._find_item_by_url(url) is not None:
             if not silent:
-                messagebox.showinfo("Ya existe", "Ese canal ya está en la cola", parent=self.root)
+                messagebox.showinfo(self._tr("Ya existe"), self._tr("Ese canal ya está en la cola"), parent=self.root)
             return False
         self.queue_items.append(
             QueueItem(
@@ -2287,7 +2793,7 @@ def main() -> None:
         style.configure("Treeview.Heading", font=heading_font)
     except Exception:
         pass
-    app = KickMinerApp(root, Path(__file__).resolve().parent)
+    app = KickMinerApp(root, Path(__file__).resolve().parent.parent)
     app.post_log("Aplicación iniciada")
     app.post_log("La app intentara restaurar la sesion guardada automaticamente al iniciar.")
     app.post_log("Si no hay sesion valida, pulsa 'Iniciar sesion' para autenticar de nuevo.")

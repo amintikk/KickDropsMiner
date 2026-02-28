@@ -1,0 +1,85 @@
+﻿name: Build Portable Apps
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main", "master"]
+
+jobs:
+  build-windows:
+    name: Windows EXE
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build one-file executable
+        run: |
+          pyinstaller --noconfirm --clean build.spec
+
+      - name: Package artifact
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Copy-Item dist\* release\ -Recurse -Force
+          Copy-Item README.md, LICENSE release\ -Force
+          Compress-Archive -Path release\* -DestinationPath KickDropsMiner-Windows-x64.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KickDropsMiner-Windows-x64
+          path: KickDropsMiner-Windows-x64.zip
+
+  build-linux:
+    name: Linux Portable Binary
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build one-file executable
+        run: |
+          pyinstaller --noconfirm --clean build.spec
+
+      - name: Package artifact
+        run: |
+          mkdir -p release
+          cp -r dist/* release/
+          cp README.md LICENSE release/
+          tar -C release -czf KickDropsMiner-Linux-x64.tar.gz .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KickDropsMiner-Linux-x64
+          path: KickDropsMiner-Linux-x64.tar.gz

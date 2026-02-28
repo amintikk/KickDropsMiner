@@ -8,4 +8,4 @@ if "%choice%"=="y" (
 ) else (
     set "exepath=%dirpath%\env\scripts\pythonw"
 )
-start "KickDropsMiner" "%exepath%" "%dirpath%\main.py"
+start "KickDropsMiner" "%exepath%" "%dirpath%\app\main.py"

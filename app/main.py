@@ -6,6 +6,10 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from multiprocessing import freeze_support
 
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
 
 def _init_ssl() -> None:
     try:
@@ -19,7 +23,7 @@ def _init_ssl() -> None:
 
 
 def _init_logging() -> None:
-    base = Path(__file__).resolve().parent
+    base = Path(__file__).resolve().parent.parent
     logs_dir = base / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_path = logs_dir / "app.log"

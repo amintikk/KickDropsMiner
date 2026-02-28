@@ -25,8 +25,26 @@ Aplicación de escritorio para gestionar campañas de Drops en Kick y minarlas a
 py -3 -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
-python main.py
+python app/main.py
 ```
+
+## App portátil (sin Python en el PC del usuario)
+
+Puedes generar binarios que ya incluyen Python y dependencias:
+
+- `Windows`: `build.bat`
+- `Linux`: `build.sh`
+
+El ejecutable final queda en `dist/`.
+
+## Builds automáticos Windows + Linux
+
+El workflow `Build Portable Apps` (`.github/workflows/build-binaries.yml`) genera artefactos:
+
+- `KickDropsMiner-Windows-x64.zip`
+- `KickDropsMiner-Linux-x64.tar.gz`
+
+Estos paquetes están pensados para usuarios finales que no quieran instalar Python.
 
 ## Flujo recomendado
 
@@ -47,7 +65,7 @@ python main.py
 ## Diagnóstico rápido
 
 ```powershell
-py -3 diagnose_env.py
+py -3 app/diagnose_env.py
 ```
 
 Genera un JSON con estado del entorno, cookies y conectividad básica de endpoints de Kick.

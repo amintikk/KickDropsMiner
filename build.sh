@@ -25,6 +25,18 @@ if [ ! -f "$dirpath/env/bin/pyinstaller" ]; then
     fi
 fi
 
+# Ensure project dependencies are installed in build environment
+echo
+echo "Syncing requirements.txt..."
+"$dirpath/env/bin/pip" install -r "$dirpath/requirements.txt"
+if [ $? -ne 0 ]; then
+    echo
+    echo "Failed to install requirements."
+    echo
+    [ "$1" != "--nopause" ] && read -p "Press any key to continue..."
+    exit 1
+fi
+
 # Run PyInstaller with the specified build spec file
 echo
 echo "Building..."
