@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  Inspired by <strong>TwitchDropsMiner</strong> by <strong>DevilXD</strong>.
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-1f6feb" alt="Platform badge" />
   <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python badge" />
 </p>
