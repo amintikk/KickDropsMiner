@@ -5,24 +5,26 @@
 <h1 align="center">Kick Drops Miner</h1>
 
 <p align="center">
-  Desktop app to track and farm Kick Drops automatically.
+  Desktop client for monitoring Kick Drops campaigns and running automated watch sessions.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-1f6feb" alt="Platform badge" />
   <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python badge" />
-  <img src="https://img.shields.io/github/actions/workflow/status/amintikk/KickDropsMiner/build-binaries.yml?label=portable%20builds" alt="Build status badge" />
 </p>
 
-## Features
-- Session login with cookie persistence.
-- Real-time campaigns and progress from Kick API.
-- Auto channel selection: online first, highest viewers first.
-- Hidden worker while farming.
-- Always-on auto-claim.
-- Visual campaigns and rewards inventory.
+## Overview
+- Desktop UI for Kick Drops campaigns, progress, channels, and inventory.
+- Session management with persistent cookies.
+- Queue-based channel worker with automatic fallback when a channel goes offline.
+- Campaign/reward thumbnails cached locally for fast UI rendering.
 
-## Quick Start (Dev)
+## Requirements
+- Python 3.10+
+- Google Chrome or Microsoft Edge
+- Windows 10/11 or modern Linux desktop
+
+## Run From Source
 ```powershell
 py -3 -m venv .venv
 .\.venv\Scripts\activate
@@ -30,24 +32,28 @@ pip install -r requirements.txt
 python app/main.py
 ```
 
-## Portable Builds (No Python Required)
-- Windows: `build.bat`
-- Linux: `build.sh`
-- Output: `dist/`
+## Build Portable Binary
+```powershell
+py -3 -m pip install -r requirements.txt
+py -3 -m pip install pyinstaller
+py -3 -m PyInstaller --noconfirm --clean build.spec
+```
 
-## GitHub CI Builds
-Go to `Actions` -> `Build Portable Apps`.
+Output: `dist/`
+
+## CI Artifacts
+GitHub Actions workflow: `Build Portable Apps`
 
 Artifacts:
 - `KickDropsMiner-Windows-x64`
 - `KickDropsMiner-Linux-x64`
 
 ## Runtime Files
-- `kick_config.json`
-- `cookies/kick.com.json`
-- `chrome_data/`
-- `cache/reward_thumbs/`
-- `logs/app.log`
+- `kick_config.json` (local settings/queue)
+- `cookies/kick.com.json` (saved session cookies)
+- `chrome_data/` (browser profile data)
+- `cache/reward_thumbs/` (thumbnail cache)
+- `logs/app.log` (current session log)
 
 ## Troubleshooting
 ```powershell

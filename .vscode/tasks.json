@@ -4,9 +4,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build App",
+            "label": "Build App (PyInstaller)",
             "type": "shell",
-            "command": "build.bat --nopause",
+            "command": "py -3 -m PyInstaller --noconfirm --clean build.spec",
             "problemMatcher": [],
             "group": {
                 "kind": "build",
@@ -15,16 +15,6 @@
             "presentation": {
                 "showReuseMessage": false
             }
-        },
-        {
-            "label": "Build and Pack App",
-            "type": "shell",
-            "command": "pack.bat",
-            "problemMatcher": [],
-            "presentation": {
-                "showReuseMessage": false
-            },
-            "dependsOn": ["Build App"]
         }
     ]
 }
