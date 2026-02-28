@@ -1,26 +1,28 @@
-﻿# Kick Drops Miner
+<p align="center">
+  <img src="icons/pickaxe.png" alt="Kick Drops Miner logo" width="110" />
+</p>
 
-Aplicación de escritorio para gestionar campañas de Drops en Kick y minarlas automáticamente desde una cola de canales.
+<h1 align="center">Kick Drops Miner</h1>
 
-## Funciones principales
+<p align="center">
+  Desktop app to track and farm Kick Drops automatically.
+</p>
 
-- Inicio de sesión asistido y persistencia de sesión entre reinicios.
-- Consulta de campañas y progreso real desde la API web de Kick.
-- Cola automática de canales con selección inteligente:
-  - solo canales en directo,
-  - prioridad al canal con más viewers dentro de la campaña.
-- Worker en modo oculto (headless/offscreen) para no abrir ventanas durante el minado.
-- Auto-claim de recompensas habilitado siempre.
-- Inventario visual de campañas y drops.
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-1f6feb" alt="Platform badge" />
+  <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python badge" />
+  <img src="https://img.shields.io/github/actions/workflow/status/amintikk/KickDropsMiner/build-binaries.yml?label=portable%20builds" alt="Build status badge" />
+</p>
 
-## Requisitos
+## Features
+- Session login with cookie persistence.
+- Real-time campaigns and progress from Kick API.
+- Auto channel selection: online first, highest viewers first.
+- Hidden worker while farming.
+- Always-on auto-claim.
+- Visual campaigns and rewards inventory.
 
-- Windows 10/11
-- Python 3.10+
-- Google Chrome o Microsoft Edge instalado
-
-## Instalación
-
+## Quick Start (Dev)
 ```powershell
 py -3 -m venv .venv
 .\.venv\Scripts\activate
@@ -28,44 +30,26 @@ pip install -r requirements.txt
 python app/main.py
 ```
 
-## App portátil (sin Python en el PC del usuario)
+## Portable Builds (No Python Required)
+- Windows: `build.bat`
+- Linux: `build.sh`
+- Output: `dist/`
 
-Puedes generar binarios que ya incluyen Python y dependencias:
+## GitHub CI Builds
+Go to `Actions` -> `Build Portable Apps`.
 
-- `Windows`: `build.bat`
-- `Linux`: `build.sh`
+Artifacts:
+- `KickDropsMiner-Windows-x64`
+- `KickDropsMiner-Linux-x64`
 
-El ejecutable final queda en `dist/`.
+## Runtime Files
+- `kick_config.json`
+- `cookies/kick.com.json`
+- `chrome_data/`
+- `cache/reward_thumbs/`
+- `logs/app.log`
 
-## Builds automáticos Windows + Linux
-
-El workflow `Build Portable Apps` (`.github/workflows/build-binaries.yml`) genera artefactos:
-
-- `KickDropsMiner-Windows-x64.zip`
-- `KickDropsMiner-Linux-x64.tar.gz`
-
-Estos paquetes están pensados para usuarios finales que no quieran instalar Python.
-
-## Flujo recomendado
-
-1. Abrir la app.
-2. Pulsar `Iniciar sesion` y completar login.
-3. Pulsar `Actualizar`.
-4. Añadir canales/campañas a la cola desde `General`.
-5. Iniciar cola.
-
-## Archivos generados
-
-- `kick_config.json`: configuración local y cola.
-- `cookies/kick.com.json`: cookies de sesión exportadas.
-- `chrome_data/`: perfil de navegador de la app.
-- `cache/reward_thumbs/`: miniaturas cacheadas.
-- `logs/app.log`: logs de la sesión actual.
-
-## Diagnóstico rápido
-
+## Troubleshooting
 ```powershell
 py -3 app/diagnose_env.py
 ```
-
-Genera un JSON con estado del entorno, cookies y conectividad básica de endpoints de Kick.
