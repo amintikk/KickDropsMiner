@@ -21,7 +21,7 @@
 
 ## Requirements
 - Python 3.10+
-- Google Chrome or Microsoft Edge
+- Google Chrome
 - Windows 10/11 or modern Linux desktop
 
 ## Run From Source
