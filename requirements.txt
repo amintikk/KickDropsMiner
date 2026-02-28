@@ -1,0 +1,7 @@
+Pillow
+truststore
+selenium>=4.20
+undetected-chromedriver>=3.5
+browser-cookie3>=0.19
+websocket-client>=1.8
+curl_cffi>=0.14

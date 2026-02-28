@@ -1,0 +1,23 @@
+# Cache files
+__pycache__
+.mypy_cache
+# Build and dist files
+/build
+/dist
+/*.exe
+/*.zip
+/*.tmp
+/Kick Drops Miner
+# Dev files
+/env
+/cache
+/*.jar
+log.txt
+/dump.dat
+/lock.file
+settings.json
+# Kick runtime files
+/kick_config.json
+/cookies/
+/chrome_data/
+/logs/
