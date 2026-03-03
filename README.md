@@ -23,6 +23,11 @@
 - Queue-based channel worker with automatic fallback when a channel goes offline.
 - Campaign/reward thumbnails cached locally for fast UI rendering.
 
+## Inventory Preview
+<p align="center">
+  <img src="media/drops.png" alt="Inventory tab preview" width="100%" />
+</p>
+
 ## Requirements
 - Python 3.10+
 - Google Chrome
